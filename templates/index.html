@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verificação de BU</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header>
+  <h1>Boletim de Urna: hash e assinatura digital</h1>
+  <p>Simulação baseada no <em>Manual para Criação de Aplicativo de Leitura do QR Code no Boletim de Urna</em>
+     (TSE, 2026): SHA-512 para integridade, ECDSA P-521 para autenticidade e não repúdio.
+     Não é o sistema oficial.</p>
+</header>
+
+<main>
+  <!-- ============================================================ URNA -->
+  <section class="painel" id="painel-urna">
+    <h2><span class="num">1</span> Urna: encerramento da votação</h2>
+
+    <div class="secao-info">
+      <p class="secao-titulo">Simulando o encerramento da votação na
+        <strong id="secao-nome">Seção 31</strong></p>
+      <p id="secao-local" class="nota"></p>
+    </div>
+
+    <h3>Presidente: resultado do 1º turno de 2026</h3>
+    <table class="tabela" id="tab-candidatos">
+      <thead><tr><th>Candidato</th><th class="num-col">Votos</th><th class="num-col">%</th></tr></thead>
+      <tbody></tbody>
+      <tfoot></tfoot>
+    </table>
+    <p class="nota">Percentuais sobre os votos válidos.</p>
+
+    <button class="pri" id="btn-emitir">Encerrar votação e emitir BU</button>
+  </section>
+
+  <!-- ============================================================ QR -->
+  <section class="painel" id="painel-qr">
+    <h2><span class="num">2</span> QR Codes impressos no BU</h2>
+
+    <div id="qr-vazio" class="vazio">Encerre a votação na urna para gerar os QR Codes.</div>
+    <div id="qr-area" hidden>
+      <div class="origem" id="qr-origem"></div>
+      <figure class="qr-bu">
+        <img id="qr-bu" alt="QR Code do boletim de urna">
+        <figcaption>Boletim de urna (QRBU 1 de 1)</figcaption>
+      </figure>
+      <div class="qr-cert">
+        <figure><img id="qr-cert-1" alt="QR Code 1 do certificado"><figcaption>Certificado 1/2</figcaption></figure>
+        <figure><img id="qr-cert-2" alt="QR Code 2 do certificado"><figcaption>Certificado 2/2</figcaption></figure>
+      </div>
+      <details>
+        <summary>Conteúdo do QR Code do BU (<span id="texto-tam"></span> caracteres)</summary>
+        <p class="legenda"><span class="seg-cab">cabeçalho</span> · <span class="seg-dados">conteúdo do boletim</span> ·
+          <span class="seg-hash">HASH</span> · <span class="seg-ass">ASSI</span></p>
+        <div class="payload" id="texto-bu"></div>
+      </details>
+    </div>
+
+  </section>
+
+  <!-- ============================================================ TOTALIZADOR -->
+  <section class="painel" id="painel-tot">
+    <h2><span class="num">3</span> Leitura e verificação</h2>
+    <button class="pri" id="btn-verificar" disabled>Ler QR Codes e verificar</button>
+
+    <div id="resultado" hidden>
+      <div id="veredito"></div>
+      <p class="nota fontes">Etapas de verificação descritas no <em>Manual para Criação de Aplicativo
+        de Leitura do QR Code no Boletim de Urna</em> (TSE, 2026). A etiqueta indica a seção do manual;
+        a cadeia de confiança do certificado não está no manual e foi acrescentada.</p>
+      <ol id="etapas"></ol>
+      <div id="bu-lido"></div>
+      <button class="pri" id="btn-totalizar">Contabilizar na totalização</button>
+    </div>
+
+    <h3>Totalização <button class="sec pequeno direita" id="btn-reiniciar">Zerar</button></h3>
+    <table class="tabela" id="tab-total">
+      <thead><tr><th>Candidato</th><th class="num-col">Votos</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="nota" id="secoes-aceitas"></p>
+    <h3>Registro de recebimentos</h3>
+    <ul id="log"></ul>
+  </section>
+
+  <!-- ============================================================ ATACANTE -->
+  <section class="painel" id="painel-lab" hidden>
+    <h2><span class="num">!</span> Laboratório do atacante</h2>
+    <p class="nota">O atacante intercepta o BU, muda os votos e imprime novos QR Codes no lugar dos
+      originais. Ele <strong>não</strong> tem a chave privada da urna, que fica no hardware de segurança.
+      Ao atualizar o conteúdo, os totais (NOMI, TOTC, COMP, FALT, HBBM) são ajustados, como faria um
+      atacante cuidadoso.</p>
+
+    <div class="lab-grade">
+      <div>
+        <p class="lab-rotulo">1. Votos</p>
+        <ul class="lab-votos" id="lab-votos"></ul>
+        <div class="acoes">
+          <button class="sec" id="btn-atualizar">Atualizar conteúdo do boletim</button>
+          <button class="sec" id="btn-restaurar">Restaurar original</button>
+        </div>
+      </div>
+      <div>
+        <p class="lab-rotulo">2. Conteúdo do boletim</p>
+        <div class="conteudo-bu" id="conteudo-bu"></div>
+      </div>
+      <div>
+        <p class="lab-rotulo">3. Segurança</p>
+        <fieldset>
+          <legend>HASH</legend>
+          <label><input type="radio" name="hash" value="manter"> manter o original</label>
+          <label><input type="radio" name="hash" value="recalcular" checked> recalcular o SHA-512</label>
+        </fieldset>
+        <fieldset>
+          <legend>ASSI e certificado</legend>
+          <label><input type="radio" name="ass" value="manter" checked> manter a assinatura original</label>
+          <label><input type="radio" name="ass" value="atacante_cert"> assinar com a chave do atacante e trocar o certificado</label>
+        </fieldset>
+        <button class="perigo" id="btn-adulterar">Gerar QR Codes adulterados</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" hidden></div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
