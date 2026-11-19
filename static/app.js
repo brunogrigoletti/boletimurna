@@ -237,9 +237,9 @@ function renderVerificacao(r) {
     li.style.animationDelay = `${i * 110}ms`;
     li.innerHTML = `
       <span class="icone">${SIMBOLO[e.status]}</span>
-      <span class="etapa-titulo">${esc(e.titulo)} ${e.secao_manual
-        ? `<span class="fonte" title="Seção do manual do TSE">manual TSE ${esc(e.secao_manual)}</span>`
-        : `<span class="fonte extra" title="Etapa não descrita no manual do TSE">fora do manual</span>`}</span>
+      <span class="etapa-titulo">${esc(e.titulo)} ${e.fonte === "manual"
+        ? `<span class="fonte" title="Seção do manual do TSE">manual TSE ${esc(e.ref)}</span>`
+        : `<span class="fonte extra" title="Etapa não descrita no manual do TSE; fonte: Schauren (2016)">Schauren ${esc(e.ref)}</span>`}</span>
       <span class="etapa-detalhe">${esc(e.detalhe)}</span>
       <span class="etapa-expl">${esc(e.explicacao)}</span>`;
     ol.appendChild(li);
