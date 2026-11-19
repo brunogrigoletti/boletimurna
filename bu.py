@@ -13,14 +13,20 @@ Segue o manual:
   - certificado da urna em QR Codes próprios (QRCE, IDUE, MDUE, CERT), em
     DER codificado em hexadecimal, dividido em dois QR Codes [manual, 1.6.2]
 
-Simplificações e acréscimos desta simulação:
+Acréscimo baseado em SCHAUREN, L. F. "Segurança no sistema brasileiro de
+votação eletrônica". Monografia (Ciência da Computação), UFRGS, 2016:
+  - o manual não descreve como confiar no certificado que vem no próprio BU.
+    Esta simulação valida a CADEIA DE CONFIANÇA em três níveis, como na
+    hierarquia de certificados da urna (Schauren, Fig. 4.7): AC URNA
+    (nível 0) -> certificado da fase (nível 1) -> certificado da urna
+    UEA<fase><id> (nível 2). Como o BU é simulado (FASE:S), a urna fica no
+    ramo SIMULADO. A âncora é publicada pelo TSE (Schauren, 5.12). Sem
+    essa etapa, um atacante que troque o certificado por um seu seria aceito.
+
+Simplificações:
   - o BU cabe em um único QR Code (o manual prevê até vários, com hash
     cumulativo) e só tem o cargo de Presidente;
   - não há EdDSA Ed521 (urnas 2020+), que a biblioteca `cryptography` não tem;
-  - o manual não descreve como confiar no certificado que vem no próprio BU.
-    Esta simulação acrescenta a validação da CADEIA DE CONFIANÇA (o certificado
-    deve ter sido emitido pela AC da Justiça Eleitoral, simulada aqui); sem
-    ela, um atacante que troque o certificado por um seu seria aceito;
   - códigos de processo, pleito, eleição, urna, carga, local, horários e
     habilitações são ILUSTRATIVOS. Os votos são o resultado real da seção.
 """
@@ -189,11 +195,24 @@ def analisar_texto_bu(texto: str) -> dict:
 # ------------------------------------------------------------------ chaves e certificados
 PASTA_CHAVES = Path(__file__).parent / "chaves"
 VALIDADE = (datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2027, 12, 31, tzinfo=timezone.utc))
-NOME_AC = x509.Name([
-    x509.NameAttribute(NameOID.COUNTRY_NAME, "BR"),
-    x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Justica Eleitoral (simulada)"),
-    x509.NameAttribute(NameOID.COMMON_NAME, "AC Raiz Simulada da Justica Eleitoral"),
-])
+
+
+def _nome(cn: str, serie: str | None = None) -> x509.Name:
+    attrs = [x509.NameAttribute(NameOID.COUNTRY_NAME, "BR"),
+             x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Justica Eleitoral (simulada)"),
+             x509.NameAttribute(NameOID.COMMON_NAME, cn)]
+    if serie:
+        attrs.append(x509.NameAttribute(NameOID.SERIAL_NUMBER, serie))
+    return x509.Name(attrs)
+
+
+# Hierarquia de certificados da urna (Schauren, Fig. 4.7). No sistema real, a
+# AC URNA emite um certificado para cada fase (oficial, simulado,
+# desenvolvimento), cada um com suas chaves. Aqui só há o ramo da fase do BU.
+FASE = "S"                                       # o BU desta simulação é simulado
+NOME_AC_URNA = _nome("AC URNA")                  # nível 0
+NOME_AC_FASE = _nome("Certificado SIMULADO")     # nível 1
+NOME_URNA = _nome(f"UEA{FASE}{URNA['idue']}", serie=URNA["idue"])   # nível 2
 
 
 def _chave(nome: str):
@@ -208,7 +227,7 @@ def _chave(nome: str):
 
 
 def _certificado(nome: str, sujeito: x509.Name, chave_publica, emissor: x509.Name,
-                 chave_emissor, ac: bool) -> x509.Certificate:
+                 chave_emissor, ac: bool, profundidade: int | None = None) -> x509.Certificate:
     arq = PASTA_CHAVES / f"{nome}.crt"
     if arq.exists():
         return x509.load_pem_x509_certificate(arq.read_bytes())
@@ -216,40 +235,41 @@ def _certificado(nome: str, sujeito: x509.Name, chave_publica, emissor: x509.Nam
             .subject_name(sujeito).issuer_name(emissor).public_key(chave_publica)
             .serial_number(x509.random_serial_number())
             .not_valid_before(VALIDADE[0]).not_valid_after(VALIDADE[1])
-            .add_extension(x509.BasicConstraints(ca=ac, path_length=None), critical=True)
+            .add_extension(x509.BasicConstraints(ca=ac, path_length=profundidade if ac else None), critical=True)
             .sign(chave_emissor, hashes.SHA512()))
     arq.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
     return cert
 
 
-def _nome_urna() -> x509.Name:
-    return x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, "BR"),
-        x509.NameAttribute(NameOID.COMMON_NAME, f"Urna Eletronica UE{URNA['mdue']}"),
-        x509.NameAttribute(NameOID.SERIAL_NUMBER, URNA["idue"]),
-    ])
+def certificado_ac_urna() -> x509.Certificate:
+    """Nível 0, a raiz: âncora de confiança publicada pelo TSE."""
+    chave = _chave("ac_urna")
+    return _certificado("ac_urna", NOME_AC_URNA, chave.public_key(), NOME_AC_URNA, chave, ac=True, profundidade=1)
 
 
-def certificado_ac():
-    """Âncora de confiança: o único certificado em que o totalizador confia."""
-    chave = _chave("ac_raiz")
-    return _certificado("ac_raiz", NOME_AC, chave.public_key(), NOME_AC, chave, ac=True)
+def certificado_ac_fase() -> x509.Certificate:
+    """Nível 1: certificado da fase, emitido pela AC URNA."""
+    chave_raiz = _chave("ac_urna")
+    certificado_ac_urna()
+    chave = _chave("ac_fase")
+    return _certificado("ac_fase", NOME_AC_FASE, chave.public_key(), NOME_AC_URNA, chave_raiz,
+                        ac=True, profundidade=0)
 
 
 def chave_e_certificado_urna():
-    """Par de chaves da urna (no real, fica no hardware de segurança) e o
-    certificado emitido pela AC raiz."""
-    chave_ac = _chave("ac_raiz")
-    certificado_ac()
+    """Nível 2: par de chaves da urna (no real, fica no hardware de segurança)
+    e o certificado emitido pelo certificado da fase."""
+    certificado_ac_fase()
+    chave_ac = _chave("ac_fase")
     chave = _chave("urna")
-    return chave, _certificado("urna", _nome_urna(), chave.public_key(), NOME_AC, chave_ac, ac=False)
+    return chave, _certificado("urna", NOME_URNA, chave.public_key(), NOME_AC_FASE, chave_ac, ac=False)
 
 
 def chave_e_certificado_atacante():
     """O atacante cria seu próprio par de chaves e um certificado que COPIA os
-    nomes da urna e da AC, mas que ele mesmo assina."""
+    nomes da urna e do certificado da fase, mas que ele mesmo assina."""
     chave = _chave("atacante")
-    return chave, _certificado("atacante", _nome_urna(), chave.public_key(), NOME_AC, chave, ac=False)
+    return chave, _certificado("atacante_falso", NOME_URNA, chave.public_key(), NOME_AC_FASE, chave, ac=False)
 
 
 def textos_certificado(cert: x509.Certificate) -> list[str]:
@@ -299,6 +319,10 @@ def adulterar(texto_bu_original: str, textos_cert_original: list[str], conteudo_
     modo_assinatura  : 'manter'         reaproveita a ASSI original (copiada do BU verdadeiro)
                        'atacante_cert'  assina com a chave do atacante e troca o certificado
     """
+    if modo_hash not in ("manter", "recalcular"):
+        raise ValueError(f"modo de HASH desconhecido: {modo_hash}")
+    if modo_assinatura not in ("manter", "atacante_cert"):
+        raise ValueError(f"modo de assinatura desconhecido: {modo_assinatura}")
     orig = analisar_texto_bu(texto_bu_original)
     conteudo = " ".join(conteudo_adulterado.upper().split())
     if not conteudo:
@@ -342,24 +366,26 @@ def ler_qr(imagem: bytes) -> str | None:
 
 
 # ------------------------------------------------------------------ verificação
-# Etapas descritas no manual do TSE (id, título, seção do manual, explicação).
+# Etapas de verificação: (id, título, (fonte, seção), explicação). A fonte é
+# o manual do TSE ou a monografia de Schauren (2016).
 ETAPAS = [
-    ("leitura", "Leitura dos QR Codes", "1.4 e 1.6.2",
+    ("leitura", "Leitura dos QR Codes", ("manual", "1.4 e 1.6.2"),
      "Decodifica as imagens: o BU vem no QR Code com a marca QRBU, e o certificado "
      "da urna em dois QR Codes com a marca QRCE."),
-    ("estrutura", "Formato e versão (QRBU, VRQR)", "1.4 a 1.4.3",
+    ("estrutura", "Formato e versão (QRBU, VRQR)", ("manual", "1.4 a 1.4.3"),
      "Registros CHAVE:VALOR separados por espaço, só com caracteres do modo "
      "alfanumérico; sequência QRBU completa; versão do formato VRQR 6.0; campos "
      "obrigatórios, HASH e ASSI presentes."),
-    ("hash", "Integridade: HASH (SHA-512)", "1.4.3",
+    ("hash", "Integridade: HASH (SHA-512)", ("manual", "1.4.3"),
      "Recalcula o SHA-512 da seção de conteúdo do boletim e compara com o campo HASH."),
-    ("certificado", "Certificado da urna (QRCE)", "1.6.2 e 1.6.3",
+    ("certificado", "Certificado da urna (QRCE)", ("manual", "1.6.2 e 1.6.3"),
      "Junta os campos CERT dos QR Codes do certificado, decodifica o X.509 (DER) e "
      "extrai a chave pública ECDSA P-521. O IDUE do certificado deve ser o do BU."),
-    ("cadeia", "Cadeia de confiança do certificado", None,
-     "Confere se o certificado foi assinado pela autoridade certificadora da Justiça "
-     "Eleitoral (simulada aqui)."),
-    ("assinatura", "Assinatura: ASSI (ECDSA P-521)", "1.6.1 e 1.6.3",
+    ("cadeia", "Cadeia de confiança do certificado", ("schauren", "Fig. 4.7 e 5.12"),
+     "Sobe a hierarquia de certificados da urna: o certificado da urna (nível 2) deve ter "
+     "sido emitido pelo certificado da fase (nível 1), e este pela AC URNA (nível 0), "
+     "cujo certificado é publicado pelo TSE."),
+    ("assinatura", "Assinatura: ASSI (ECDSA P-521)", ("manual", "1.6.1 e 1.6.3"),
      "Verifica ASSI sobre o SHA-512 do HASH com a chave pública do certificado, "
      "como no código de exemplo do manual."),
 ]
@@ -448,12 +474,15 @@ def verificar(imagens: list[bytes] | None = None, textos: list[str | None] | Non
             cert = None
 
     if cert is not None:
-        # cadeia de confiança (não descrita no manual)
+        # cadeia de confiança: nível 2 -> nível 1 -> nível 0 (âncora)
         try:
-            cert.verify_directly_issued_by(certificado_ac())
-            res["cadeia"] = ("ok", "certificado emitido pela AC da Justiça Eleitoral (simulada)")
+            ac_fase = certificado_ac_fase()
+            cert.verify_directly_issued_by(ac_fase)
+            ac_fase.verify_directly_issued_by(certificado_ac_urna())
+            cn = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+            res["cadeia"] = ("ok", f"AC URNA → Certificado SIMULADO → {cn}")
         except (ValueError, TypeError, InvalidSignature):
-            res["cadeia"] = ("falha", "o certificado NÃO foi emitido pela AC da Justiça Eleitoral: "
+            res["cadeia"] = ("falha", "o certificado NÃO foi emitido pela hierarquia da AC URNA: "
                                       "é um certificado falso")
 
         # assinatura
@@ -465,9 +494,9 @@ def verificar(imagens: list[bytes] | None = None, textos: list[str | None] | Non
                 res["assinatura"] = ("falha", "ASSI não confere com o HASH e a chave do certificado")
 
     etapas = []
-    for id_, titulo, secao_manual, explicacao in ETAPAS:
+    for id_, titulo, (fonte, ref), explicacao in ETAPAS:
         status, detalhe = res.get(id_) or ("pulado", "não executada: depende de uma etapa anterior")
-        etapas.append({"id": id_, "titulo": titulo, "secao_manual": secao_manual, "status": status,
+        etapas.append({"id": id_, "titulo": titulo, "fonte": fonte, "ref": ref, "status": status,
                        "detalhe": detalhe, "explicacao": explicacao})
 
     return {
