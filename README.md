@@ -26,17 +26,18 @@ Alegre/RS**, com o **resultado real do 1º turno de 2026** para Presidente
    conteúdo do BU no formato do manual, calcula o **SHA-512**, assina com
    **ECDSA P-521** e imprime três QR Codes: o do BU e os dois do certificado
    da urna.
-2. **Laboratório do atacante** (quadro escuro, abaixo): o atacante muda os
-   votos de cada candidato e clica em **Atualizar conteúdo do boletim**. Os
-   registros alterados aparecem em vermelho, e os totais são ajustados, como
-   faria um atacante cuidadoso. Depois ele escolhe o que fazer com o HASH
-   (manter ou recalcular) e com a assinatura e o certificado (copiar a
-   assinatura original, ou assinar com a própria chave e trocar o
-   certificado), e gera os QR Codes adulterados. Ele nunca tem a chave
-   privada da urna.
+2. **QR Codes**: mostra as imagens geradas e o texto codificado no QR Code do
+   BU, com as três seções destacadas.
 3. **Leitura e verificação**: decodifica as **imagens** dos QR Codes e mostra
    cada etapa de validação. O totalizador só contabiliza BUs aprovados em
    todas elas e recusa um segundo BU para a mesma seção (replay).
+4. **Laboratório do atacante**: o atacante muda os votos de cada candidato e
+   clica em **Atualizar conteúdo do boletim**. Os registros alterados aparecem
+   em vermelho, e os totais são ajustados, como faria um atacante cuidadoso.
+   Depois ele escolhe o que fazer com o HASH (manter ou recalcular) e com a
+   assinatura e o certificado (copiar a assinatura original, ou assinar com a
+   própria chave e trocar o certificado), e gera os QR Codes adulterados. Ele
+   nunca tem a chave privada da urna.
 
 ## Formato do QR Code (manual, seção 1.4)
 
@@ -147,11 +148,10 @@ QR Codes adulterados e verifique.
 - Da Fig. 4.7, só o ramo SIMULADO e o certificado de autenticação da urna
   são gerados; os ramos oficial e de desenvolvimento e os certificados de
   sigilo (`UES*`) ficam de fora.
-- Em 2016, segundo Schauren, o QR Code era assinado com Ed25519; o manual de
-  2026 usa ECDSA P-521 (urnas 2013 e 2015) e Ed521 (2020+).
+- O manual de 2026 usa ECDSA P-521 (urnas UE2013 e UE2015) e EdDSA com a
+  curva E-521 (urnas UE2020+). A biblioteca `cryptography` não implementa
+  EdDSA/E-521; aqui é usado o ECDSA P-521.
 - O BU cabe em um único QR Code. O manual prevê vários, com hash cumulativo.
-- As urnas 2020 e 2022 usam EdDSA (Ed521), que a biblioteca `cryptography`
-  não implementa. Aqui é usado o ECDSA P-521 das urnas 2013 e 2015.
 - Os nomes dos candidatos, no sistema real, vêm de um arquivo de complemento
   assinado pelo TSE (manual, 1.7). Aqui estão fixos no código.
 
@@ -173,3 +173,9 @@ UFRGS, Instituto de Informática, 2016.
 
 TRIBUNAL SUPERIOR ELEITORAL. *QR Code no boletim de urna: manual para criação
 de aplicativo de leitura*. Brasília: TSE, 2026.
+
+ARANHA, Diego F. et al. *A note on high-security general-purpose elliptic
+curves*. Cryptology ePrint Archive, Report 2013/647, 2013.
+
+ED25519. *Ed25519: high-speed high-security signatures*. Disponível em:
+<https://ed25519.cr.yp.to>.
